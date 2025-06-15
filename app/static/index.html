@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .panel {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 15px;
+        }
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .system {
+            background-color: #f0f0f0;
+        }
+        .chat {
+            background-color: #e6f7ff;
+        }
+        .notification {
+            background-color: #fffbe6;
+        }
+        .error {
+            background-color: #fff1f0;
+        }
+        input, button, textarea {
+            margin-bottom: 10px;
+            padding: 8px;
+        }
+        input, textarea {
+            width: calc(100% - 20px);
+        }
+        button {
+            cursor: pointer;
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 8px 16px;
+        }
+        button:hover {
+            background-color: #40a9ff;
+        }
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .connected {
+            color: green;
+        }
+        .disconnected {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Test Client</h1>
+    
+    <div class="container">
+        <!-- Chat Panel -->
+        <div class="panel">
+            <h2>Chat</h2>
+            <div class="status chat-status disconnected">Disconnected</div>
+            <div class="messages chat-messages"></div>
+            <input type="text" id="clientId" placeholder="Client ID (optional)">
+            <input type="text" id="chatMessage" placeholder="Type your message...">
+            <div>
+                <button id="connectChat">Connect</button>
+                <button id="sendChat">Send Message</button>
+                <button id="disconnectChat">Disconnect</button>
+            </div>
+        </div>
+        
+        <!-- Notifications Panel -->
+        <div class="panel">
+            <h2>Notifications</h2>
+            <div class="status notification-status disconnected">Disconnected</div>
+            <div class="messages notification-messages"></div>
+            <textarea id="notificationData" rows="4" placeholder='{"command": "subscribe", "topic": "general"}'></textarea>
+            <div>
+                <button id="connectNotifications">Connect</button>
+                <button id="sendNotification">Send Command</button>
+                <button id="disconnectNotifications">Disconnect</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container" style="margin-top: 20px;">
+        <!-- Profile Panel -->
+        <div class="panel">
+            <h2>Profile</h2>
+            <div class="status profile-status disconnected">Disconnected</div>
+            <div class="messages profile-messages"></div>
+            <input type="text" id="accessToken" placeholder="Access Token (required)" style="width: calc(100% - 20px);">
+            <div>
+                <button id="connectProfile">Connect</button>
+                <button id="refreshProfile">Refresh Profile</button>
+                <button id="disconnectProfile">Disconnect</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chat WebSocket
+        let chatSocket = null;
+        const chatMessages = document.querySelector('.chat-messages');
+        const chatStatus = document.querySelector('.chat-status');
+        
+        document.getElementById('connectChat').addEventListener('click', () => {
+            const clientId = document.getElementById('clientId').value;
+            const url = clientId ? 
+                `ws://${window.location.host}/ws/chat?client_id=${encodeURIComponent(clientId)}` : 
+                `ws://${window.location.host}/ws/chat`;
+                
+            chatSocket = new WebSocket(url);
+            
+            chatSocket.onopen = () => {
+                chatStatus.textContent = 'Connected';
+                chatStatus.classList.remove('disconnected');
+                chatStatus.classList.add('connected');
+                addMessage(chatMessages, 'system', 'Connected to chat server');
+            };
+            
+            chatSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addMessage(chatMessages, data.type, 
+                    data.type === 'chat' ? 
+                        `${data.client_id}: ${data.message}` : 
+                        data.message
+                );
+            };
+            
+            chatSocket.onclose = () => {
+                chatStatus.textContent = 'Disconnected';
+                chatStatus.classList.remove('connected');
+                chatStatus.classList.add('disconnected');
+                addMessage(chatMessages, 'system', 'Disconnected from chat server');
+                chatSocket = null;
+            };
+            
+            chatSocket.onerror = (error) => {
+                addMessage(chatMessages, 'error', 'WebSocket error: ' + error.message);
+            };
+        });
+        
+        document.getElementById('sendChat').addEventListener('click', () => {
+            if (!chatSocket) {
+                addMessage(chatMessages, 'error', 'Not connected to chat server');
+                return;
+            }
+            
+            const message = document.getElementById('chatMessage').value;
+            if (message) {
+                chatSocket.send(JSON.stringify({ message }));
+                document.getElementById('chatMessage').value = '';
+            }
+        });
+        
+        document.getElementById('disconnectChat').addEventListener('click', () => {
+            if (chatSocket) {
+                chatSocket.close();
+            }
+        });
+        
+        // Notifications WebSocket
+        let notificationSocket = null;
+        const notificationMessages = document.querySelector('.notification-messages');
+        const notificationStatus = document.querySelector('.notification-status');
+        
+        document.getElementById('connectNotifications').addEventListener('click', () => {
+            const clientId = document.getElementById('clientId').value;
+            const url = clientId ? 
+                `ws://${window.location.host}/ws/notifications?client_id=${encodeURIComponent(clientId)}` : 
+                `ws://${window.location.host}/ws/notifications`;
+                
+            notificationSocket = new WebSocket(url);
+            
+            notificationSocket.onopen = () => {
+                notificationStatus.textContent = 'Connected';
+                notificationStatus.classList.remove('disconnected');
+                notificationStatus.classList.add('connected');
+                addMessage(notificationMessages, 'system', 'Connected to notifications server');
+            };
+            
+            notificationSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'notification') {
+                    addMessage(notificationMessages, 'notification', 
+                        `Notification: ${JSON.stringify(data.data)}`);
+                } else {
+                    addMessage(notificationMessages, data.type, data.message);
+                }
+            };
+            
+            notificationSocket.onclose = () => {
+                notificationStatus.textContent = 'Disconnected';
+                notificationStatus.classList.remove('connected');
+                notificationStatus.classList.add('disconnected');
+                addMessage(notificationMessages, 'system', 'Disconnected from notifications server');
+                notificationSocket = null;
+            };
+            
+            notificationSocket.onerror = (error) => {
+                addMessage(notificationMessages, 'error', 'WebSocket error: ' + error.message);
+            };
+        });
+        
+        document.getElementById('sendNotification').addEventListener('click', () => {
+            if (!notificationSocket) {
+                addMessage(notificationMessages, 'error', 'Not connected to notifications server');
+                return;
+            }
+            
+            const data = document.getElementById('notificationData').value;
+            if (data) {
+                try {
+                    // Validate JSON
+                    JSON.parse(data);
+                    notificationSocket.send(data);
+                } catch (e) {
+                    addMessage(notificationMessages, 'error', 'Invalid JSON: ' + e.message);
+                }
+            }
+        });
+        
+        document.getElementById('disconnectNotifications').addEventListener('click', () => {
+            if (notificationSocket) {
+                notificationSocket.close();
+            }
+        });
+        
+        // Profile WebSocket
+        let profileSocket = null;
+        const profileMessages = document.querySelector('.profile-messages');
+        const profileStatus = document.querySelector('.profile-status');
+        
+        document.getElementById('connectProfile').addEventListener('click', () => {
+            const accessToken = document.getElementById('accessToken').value;
+            if (!accessToken) {
+                addMessage(profileMessages, 'error', 'Access token is required');
+                return;
+            }
+            
+            const url = `ws://${window.location.host}/ws/profile?client_id=${encodeURIComponent(accessToken)}`;
+                
+            profileSocket = new WebSocket(url);
+            
+            profileSocket.onopen = () => {
+                profileStatus.textContent = 'Connected';
+                profileStatus.classList.remove('disconnected');
+                profileStatus.classList.add('connected');
+                addMessage(profileMessages, 'system', 'Connected to profile server');
+            };
+            
+            profileSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addMessage(profileMessages, 'notification', 
+                    `Profile data: ${JSON.stringify(data, null, 2)}`);
+                
+                // Display profile image if available
+                if (data.status && data.profile && data.profile.medias) {
+                    const imgDiv = document.createElement('div');
+                    imgDiv.classList.add('message', 'notification');
+                    
+                    const img = document.createElement('img');
+                    img.src = data.profile.medias.path;
+                    img.style.maxWidth = '100%';
+                    img.style.borderRadius = '5px';
+                    
+                    imgDiv.appendChild(img);
+                    profileMessages.appendChild(imgDiv);
+                    profileMessages.scrollTop = profileMessages.scrollHeight;
+                }
+            };
+            
+            profileSocket.onclose = (event) => {
+                profileStatus.textContent = 'Disconnected';
+                profileStatus.classList.remove('connected');
+                profileStatus.classList.add('disconnected');
+                addMessage(profileMessages, 'system', `Disconnected from profile server: ${event.reason || 'Unknown reason'}`);
+                profileSocket = null;
+            };
+            
+            profileSocket.onerror = (error) => {
+                addMessage(profileMessages, 'error', 'WebSocket error: ' + error.message);
+            };
+        });
+        
+        document.getElementById('refreshProfile').addEventListener('click', () => {
+            if (!profileSocket) {
+                addMessage(profileMessages, 'error', 'Not connected to profile server');
+                return;
+            }
+            
+            profileSocket.send(JSON.stringify({ command: 'refresh_profile' }));
+        });
+        
+        document.getElementById('disconnectProfile').addEventListener('click', () => {
+            if (profileSocket) {
+                profileSocket.close();
+            }
+        });
+        
+        // Helper function to add messages to the UI
+        function addMessage(container, type, text) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', type);
+            
+            // Check if text is JSON and format it nicely
+            if (type === 'notification' && text.startsWith('Profile data:')) {
+                const preElement = document.createElement('pre');
+                preElement.style.whiteSpace = 'pre-wrap';
+                preElement.style.wordBreak = 'break-word';
+                preElement.style.margin = '0';
+                preElement.textContent = text;
+                messageDiv.appendChild(preElement);
+            } else {
+                messageDiv.textContent = text;
+            }
+            
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
+</body>
+</html> 
